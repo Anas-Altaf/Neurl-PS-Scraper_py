@@ -41,7 +41,7 @@ class MetadataStorage:
 
     def _initialize_files(self):
         # Initialize CSV file with headers if it doesn't exist
-        csv_directory = str(self.csv_file.split('/')[:-1])
+        csv_directory = str(self.csv_file.split('/')[:-1])  # ignore the file name
         if not os.path.exists(path=csv_directory):
             os.makedirs(csv_directory)
         # Initialize the CSV file asynchronously
