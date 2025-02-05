@@ -282,7 +282,7 @@ async def main():
         start_year, end_year = get_inputs(max_year, min_year, download_directory)
         if st.button("Start Downloading"):
             if start_year < min_year or end_year > max_year:
-                log_container.toast(f"Please Enter Year between {min_year} and {max_year}, Please try again")
+                st.toast(f"Please Enter Year between {min_year} and {max_year}, Please try again")
                 st.rerun()
             else:
                 log_container.success(
