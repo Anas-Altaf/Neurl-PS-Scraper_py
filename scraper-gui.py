@@ -274,10 +274,10 @@ async def main():
     progress_tracker = ProgressTracker()
     # Initialize MetadataStorage
     with log_container.container():
-        csv_path = get_csv_path(csv_path) | csv_path
+        csv_path = get_csv_path(csv_path)
         metadata_storage = MetadataStorage(csv_file=csv_path)
         nips_scrapper = NipsScrapper(base_url, download_directory, semaphore, progress_tracker, metadata_storage)
-        max_year, min_year = nips_scrapper.get_max_min_year() | (2024, 1987)
+        max_year, min_year = nips_scrapper.get_max_min_year()
         start_year, end_year = get_inputs(max_year, min_year, download_directory)
         if st.button("Start Downloading"):
             if start_year <= min_year and end_year >= max_year:
