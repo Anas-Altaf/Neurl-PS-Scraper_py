@@ -34,16 +34,16 @@ def check_network_availability(url):
 
 
 class MetadataStorage:
-    def __init__(self, csv_file='./metadata/papers_metadata.csv'):
+    def __init__(self, csv_file='./metadata', csv_file_name="/papers_metadata.csv"):
         self.csv_file = csv_file
         self.loop = asyncio.get_event_loop()  # Get the event loop
         self._initialize_files()
+        self.csv_file_name = csv_file_name
 
     def _initialize_files(self):
         # Initialize CSV file with headers if it doesn't exist
-        csv_directory = str(self.csv_file.split('/')[:-1])  # ignore the file name
-        if not os.path.exists(path=csv_directory):
-            os.makedirs(csv_directory)
+        if not os.path.exists(path=self.csv_file):
+            os.makedirs(self.csv_file)
         # Initialize the CSV file asynchronously
         if not os.path.exists(self.csv_file):
             self.loop.run_in_executor(None, self._initialize_csv)
@@ -61,7 +61,7 @@ class MetadataStorage:
 
     def _write_to_csv(self, df):
         # This function runs in a separate thread for non-blocking behavior
-        df.to_csv(self.csv_file, mode='a', header=False, index=False, encoding='utf-8')
+        df.to_csv(self.csv_file + self.csv_file_name, mode='a', header=False, index=False, encoding='utf-8')
 
     async def save_paper_metadata(self, paper_name, author, year, pdf_link):
         paper_name = sanitize_filename(paper_name)
@@ -246,17 +246,17 @@ def get_inputs(max_year=2024, min_year=1987, download_directory="./downloads"):
         st.number_input("Enter Min Year: ", min_value=min_year, max_value=max_year, value=min_year))
     end_year = int(
         st.number_input("Enter Max Year: ", min_value=min_year, max_value=max_year, value=max_year))
-    folder_path = st.text_input("Enter Folder Path: ", value=download_directory,
-                                placeholder="Enter download folder path : ", disabled=False)
 
     return start_year, end_year
 
 
-def get_csv_path(csv_path):
+def get_paths(csv_path, download_directory):
     csv_path = st.text_input("Enter Metadata Path: ", value=csv_path,
                              placeholder="Enter metadata path : ", disabled=False)
     st.toast(f"CSV Path Selected: {csv_path}")
-    return csv_path
+    folder_path = st.text_input("Enter Folder Path: ", value=download_directory,
+                                placeholder="Enter download folder path : ", disabled=False)
+    return folder_path, csv_path
 
 
 async def main():
@@ -264,7 +264,8 @@ async def main():
     # Scraper setup
     base_url = "https://papers.nips.cc"  # The correct base URL for your target website
     download_directory = "./downloaded_papers"
-    csv_path = "./metadata/papers_metadata.csv"
+    csv_path = "./metadata"
+    csv_file_name = "/papers_metadata.csv"
     if not check_network_availability(base_url):
         if st.button("Reload"):
             st.rerun()
@@ -274,10 +275,10 @@ async def main():
     progress_tracker = ProgressTracker()
     # Initialize MetadataStorage
     with log_container.container():
-        csv_path = get_csv_path(csv_path)
-        metadata_storage = MetadataStorage(csv_file=csv_path)
+        download_directory, csv_path = get_paths(csv_path, download_directory)
+        metadata_storage = MetadataStorage(csv_file=csv_path, csv_file_name=csv_file_name)
         nips_scrapper = NipsScrapper(base_url, download_directory, semaphore, progress_tracker, metadata_storage)
-        max_year, min_year = nips_scrapper.get_max_min_year()
+        max_year, min_year = await nips_scrapper.get_max_min_year()
         start_year, end_year = get_inputs(max_year, min_year, download_directory)
         if st.button("Start Downloading"):
             if start_year <= min_year and end_year >= max_year:
