@@ -9,8 +9,10 @@
       <excludeFolder url="file://$MODULE_DIR$/venv/etc" />
       <excludeFolder url="file://$MODULE_DIR$/venv/share" />
       <excludeFolder url="file://$MODULE_DIR$/venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.idea/inspectionProfiles" />
+      <excludeFolder url="file://$MODULE_DIR$/metadata" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.12 (Neurl-PS-Scrapper_py)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.12" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
