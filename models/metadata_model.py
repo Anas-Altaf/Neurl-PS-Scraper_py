@@ -24,11 +24,11 @@ class MetadataModel:
     def _initialize_csv(self):
         with open(self.csv_file, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            writer.writerow(['paper_name', 'author', 'year', 'pdf_link'])
+            writer.writerow(['Paper', 'Author', 'Year', 'PdfLink'])
 
     async def _append_to_csv(self, paper_name, author, year, pdf_link):
         df = pd.DataFrame([[paper_name, author, year, pdf_link]],
-                          columns=['paper_name', 'author', 'year', 'pdf_link'])
+                          columns=['Paper', 'Author', 'Year', 'PdfLink'])
         await self.loop.run_in_executor(None, self._write_to_csv, df)
 
     def _write_to_csv(self, df):
