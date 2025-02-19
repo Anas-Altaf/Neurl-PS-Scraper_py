@@ -27,7 +27,7 @@ def sanitize_filename(filename: str) -> str:
 
 def check_network_availability(url):
     try:
-        response = requests.get(url)
+        requests.get(url)
         return True
     except requests.ConnectionError:
         return False
@@ -52,20 +52,21 @@ class MetadataStorage:
         # Initialize CSV file with headers if it doesn't exist
         with open(self.csv_file, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            writer.writerow(['paper_name', 'author', 'year', 'pdf_link'])
+            writer.writerow(['Paper', 'Author', 'Year', 'PdfLink', 'Abstract'])
 
-    async def _append_to_csv(self, paper_name, author, year, pdf_link):
+    async def _append_to_csv(self, paper_name, author, year, pdf_link, abstract):
         # Append paper metadata to CSV (using pandas)
-        df = pd.DataFrame([[paper_name, author, year, pdf_link]], columns=['paper_name', 'author', 'year', 'pdf_link'])
+        df = pd.DataFrame([[paper_name, author, year, pdf_link, abstract]],
+                          columns=['Paper', 'Author', 'Year', 'PdfLink', 'Abstract'])
         await self.loop.run_in_executor(None, self._write_to_csv, df)
 
     def _write_to_csv(self, df):
         # This function runs in a separate thread for non-blocking behavior
         df.to_csv(self.csv_file + self.csv_file_name, mode='a', header=False, index=False, encoding='utf-8')
 
-    async def save_paper_metadata(self, paper_name, author, year, pdf_link):
+    async def save_paper_metadata(self, paper_name, author, year, pdf_link, abstract):
         paper_name = sanitize_filename(paper_name)
-        await self._append_to_csv(paper_name, author, year, pdf_link)
+        await self._append_to_csv(paper_name, author, year, pdf_link, abstract)
 
 
 class ProgressTracker:
@@ -119,14 +120,15 @@ class ProgressTracker:
 
 
 class NipsScrapper:
-    def __init__(self, base_url, download_directory, semaphore, progress_tracker: ProgressTracker, metadata_storage):
+    def __init__(self, base_url, download_directory, semaphore, progress_tracker: ProgressTracker,
+                 metadata_storage: MetadataStorage):
         self.base_url = base_url
         self.download_directory = download_directory
         self.semaphore = semaphore
         self.progress_tracker = progress_tracker
         self.metadata_storage = metadata_storage
 
-    async def download_paper(self, session, pdf_url: str, save_directory: str, paper_name: str, year: str, author):
+    async def download_paper(self, session, pdf_url: str, save_directory: str, paper_name: str, year: str):
         try:
             paper_name = sanitize_filename(paper_name)
             async with session.get(pdf_url) as response:
@@ -142,6 +144,19 @@ class NipsScrapper:
             print(f"Failed to download {paper_name}: {e}")
             self.progress_tracker.update(year, "failed")
             return {"status": "failed", "file_name": "", "url": pdf_url, "year": year}
+
+    async def get_paper_abstract(self, paper_web_link, session) -> str:
+        try:
+            async with session.get(paper_web_link) as response:
+                response.raise_for_status()
+                soup = BeautifulSoup(await response.text(), 'html.parser')
+                abstract = soup.select('body > div.container-fluid > div > p:nth-child(9)').get_text()
+                st.write(f'Abstract for {paper_web_link} : \n')
+                st.code(abstract)
+                return abstract
+        except aiohttp.ClientError as e:
+            print(f"Failed to extract Abstract  from {paper_web_link}: {e}")
+        return ''
 
     async def extract_paper_links(self, session, page_url: str):
         try:
@@ -184,6 +199,7 @@ class NipsScrapper:
         # Extract all year-wise sub-links
         async with aiohttp.ClientSession() as session:
             year_links = await self.extract_year_links(session, self.base_url)
+            # st.code(f"Years : {year_links}")
             return int(year_links[0].split('/')[-1]), int(year_links[-1].split('/')[-1])
 
     def convert_to_pdf_url(self, abstract_url: str) -> str:
@@ -212,18 +228,19 @@ class NipsScrapper:
                         pdf_link = self.convert_to_pdf_url(paper_link["link"])
                         paper_name = paper_link["title"]
                         author = paper_link["author"]
+                        paper_abstract = await self.get_paper_abstract(self.base_url + paper_link["link"], session)
                         tasks.append(
                             self.download_paper_with_semaphore(session, self.base_url + pdf_link, paper_name, year,
-                                                               author))
+                                                               author, paper_abstract))
 
             for _ in await asyncio.gather(*tasks):
                 pass
 
-    async def download_paper_with_semaphore(self, session, pdf_url: str, paper_name: str, year: str, author):
+    async def download_paper_with_semaphore(self, session, pdf_url: str, paper_name: str, year: str, author, abstract):
         async with self.semaphore:
             await self.metadata_storage.save_paper_metadata(paper_name=paper_name, author=author, year=year,
-                                                            pdf_link=pdf_url)
-            return await self.download_paper(session, pdf_url, self.download_directory, paper_name, year, author)
+                                                            pdf_link=pdf_url, abstract=abstract)
+            return await self.download_paper(session, pdf_url, self.download_directory, paper_name, year)
 
 
 def init_ui():
@@ -232,6 +249,8 @@ def init_ui():
         page_title="NIPS Scrapper ",
         page_icon="📚",
     )
+    if 'session' not in st.session_state.s:
+        st.session_state.s = 'session'
     st.logo(icon_image="images/icon-books.png", image="./images/icon-books.png", size="large",
             link="https://github.com/Anas-Altaf")
     st.title("Neural-PS Scraper")
@@ -260,36 +279,42 @@ def get_paths(csv_path, download_directory):
 
 
 async def main():
-    log_container = init_ui()
-    # Scraper setup
-    base_url = "https://papers.nips.cc"  # The correct base URL for your target website
-    download_directory = "./downloaded_papers"
-    csv_path = "./metadata"
-    csv_file_name = "/papers_metadata.csv"
-    if not check_network_availability(base_url):
-        if st.button("Reload"):
-            st.rerun()
-        log_container.error("Unable to access Site, Please check your internet connection and try again.")
-        return
-    semaphore = asyncio.Semaphore(10)
-    progress_tracker = ProgressTracker()
-    # Initialize MetadataStorage
-    with log_container.container():
-        download_directory, csv_path = get_paths(csv_path, download_directory)
-        metadata_storage = MetadataStorage(csv_file=csv_path, csv_file_name=csv_file_name)
-        nips_scrapper = NipsScrapper(base_url, download_directory, semaphore, progress_tracker, metadata_storage)
-        max_year, min_year = await nips_scrapper.get_max_min_year()
-        start_year, end_year = get_inputs(max_year, min_year, download_directory)
-        if st.button("Start Downloading"):
-            if start_year < min_year or end_year > max_year:
-                st.toast(f"Please Enter Year between {min_year} and {max_year}, Please try again")
+    try:
+
+        log_container = init_ui()
+        # Scraper setup
+        base_url = "https://papers.nips.cc"  # The correct base URL for your target website
+        download_directory = r".\downloaded_papers"
+        csv_path = "./metadata"
+        csv_file_name = "/papers_metadata.csv"
+        if not check_network_availability(base_url):
+            if st.button("Reload"):
                 st.rerun()
-            else:
-                log_container.success(
-                    f"Downloading : {(end_year - start_year) + 1} years Papers from {start_year} to {end_year}, Please wait...")
-                # Start downloading papers
-                results = await nips_scrapper.download_papers_from_year_range(start_year, end_year)
-                log_container.toast(f" ✅ Download Completed.")
+            log_container.error("Unable to access Site, Please check your internet connection and try again.")
+            return
+        semaphore = asyncio.Semaphore(10)
+        progress_tracker = ProgressTracker()
+        # Initialize MetadataStorage
+        with log_container.container():
+            download_directory, csv_path = get_paths(csv_path, download_directory)
+            # st.write(f"Path is {download_directory}")
+            metadata_storage = MetadataStorage(csv_file=csv_path, csv_file_name=csv_file_name)
+            nips_scrapper = NipsScrapper(base_url, os.path.join(download_directory, 'docs'), semaphore,
+                                         progress_tracker, metadata_storage)
+            max_year, min_year = await nips_scrapper.get_max_min_year()
+            start_year, end_year = get_inputs(max_year, min_year, download_directory)
+            if st.button("Start Downloading"):
+                if start_year < min_year or end_year > max_year:
+                    st.toast(f"Please Enter Year between {min_year} and {max_year}, Please try again")
+                    st.rerun()
+                else:
+                    log_container.success(
+                        f"Downloading : {(end_year - start_year) + 1} years Papers from {start_year} to {end_year}, Please wait...")
+                    # Start downloading papers
+                    await nips_scrapper.download_papers_from_year_range(start_year, end_year)
+                    log_container.toast(f" ✅ Download Completed.")
+    except Exception as e:
+        st.error(f"Error : {e}")
 
 
 if __name__ == "__main__":
