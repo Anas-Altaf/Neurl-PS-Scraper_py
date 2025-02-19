@@ -150,7 +150,7 @@ class NipsScrapper:
             async with session.get(paper_web_link) as response:
                 response.raise_for_status()
                 soup = BeautifulSoup(await response.text(), 'html.parser')
-                abstract = soup.select('body > div.container-fluid > div > p:nth-child(9)').get_text()
+                abstract = soup.select_one('body > div.container-fluid > div > p:nth-child(9)').get_text()
                 st.write(f'Abstract for {paper_web_link} : \n')
                 st.code(abstract)
                 return abstract
@@ -249,7 +249,7 @@ def init_ui():
         page_title="NIPS Scrapper ",
         page_icon="📚",
     )
-    if 'session' not in st.session_state.s:
+    if 'session' not in st.session_state:
         st.session_state.s = 'session'
     st.logo(icon_image="images/icon-books.png", image="./images/icon-books.png", size="large",
             link="https://github.com/Anas-Altaf")
