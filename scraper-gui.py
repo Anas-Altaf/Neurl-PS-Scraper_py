@@ -62,7 +62,7 @@ class MetadataStorage:
 
     def _write_to_csv(self, df):
         # This function runs in a separate thread for non-blocking behavior
-        df.to_csv(self.csv_file + self.csv_file_name, mode='a', header=False, index=False, encoding='utf-8')
+        df.to_csv(self.csv_file + self.csv_file_name, mode='a', header=True, index=False, encoding='utf-8')
 
     async def save_paper_metadata(self, paper_name, author, year, pdf_link, abstract):
         paper_name = sanitize_filename(paper_name)
@@ -82,15 +82,14 @@ class ProgressTracker:
         self.year_stats = {}
 
     def update(self, year, status):
+        if year not in self.year_stats:
+            self.year_stats[year] = {"downloaded": 0, "failed": 0, "total_papers": 0}
+
         if status == "success":
             self.downloaded_papers += 1
-            if year not in self.year_stats:
-                self.year_stats[year] = {"downloaded": 0, "failed": 0}
             self.year_stats[year]["downloaded"] += 1
         else:
             self.failed_papers += 1
-            if year not in self.year_stats:
-                self.year_stats[year] = {"downloaded": 0, "failed": 0}
             self.year_stats[year]["failed"] += 1
         self.display_ui_progress()
 
@@ -106,7 +105,7 @@ class ProgressTracker:
     def display_ui_progress(self):
         overall_progress = self.get_overall_progress() / 100
         progress_msg = f"Overall Progress : {self.get_overall_progress():.2f}%"
-        overall_papers_status = f"Papers\nTotal: {self.total_papers}  | Downloaded: {self.downloaded_papers}  | Failed: {self.failed_papers}"
+        overall_papers_status = f"Papers Total: {self.total_papers}  | Downloaded: {self.downloaded_papers}  | Failed: {self.failed_papers}"
 
         self.progress_bar.progress(value=overall_progress, text=progress_msg)
 
@@ -128,7 +127,7 @@ class NipsScrapper:
         self.progress_tracker = progress_tracker
         self.metadata_storage = metadata_storage
 
-    async def download_paper(self, session, pdf_url: str, save_directory: str, paper_name: str, year: str):
+    async def download_paper(self, session, pdf_url: str, save_directory: str, paper_name: str, year):
         try:
             paper_name = sanitize_filename(paper_name)
             async with session.get(pdf_url) as response:
@@ -150,11 +149,13 @@ class NipsScrapper:
             async with session.get(paper_web_link) as response:
                 response.raise_for_status()
                 soup = BeautifulSoup(await response.text(), 'html.parser')
-                abstract = soup.select_one('body > div.container-fluid > div > p:nth-child(9)').get_text()
-                st.write(f'Abstract for {paper_web_link} : \n')
-                st.code(abstract)
+                abstract = ''
+                abstract_paras = soup.select('body > div.container-fluid > div > p')
+                if abstract_paras:
+                    abstract = abstract_paras[2].text
+                    # st.code(f"Abstract Para : {abstract}")
                 return abstract
-        except aiohttp.ClientError as e:
+        except Exception as e:
             print(f"Failed to extract Abstract  from {paper_web_link}: {e}")
         return ''
 
@@ -229,14 +230,14 @@ class NipsScrapper:
                         paper_name = paper_link["title"]
                         author = paper_link["author"]
                         paper_abstract = await self.get_paper_abstract(self.base_url + paper_link["link"], session)
-                        tasks.append(
-                            self.download_paper_with_semaphore(session, self.base_url + pdf_link, paper_name, year,
-                                                               author, paper_abstract))
+                        tasks.append(self.download_paper_with_semaphore(session, self.base_url + pdf_link, paper_name,
+                                                                        year,
+                                                                        author, paper_abstract))
 
             for _ in await asyncio.gather(*tasks):
-                pass
+                await  _
 
-    async def download_paper_with_semaphore(self, session, pdf_url: str, paper_name: str, year: str, author, abstract):
+    async def download_paper_with_semaphore(self, session, pdf_url: str, paper_name: str, year, author, abstract):
         async with self.semaphore:
             await self.metadata_storage.save_paper_metadata(paper_name=paper_name, author=author, year=year,
                                                             pdf_link=pdf_url, abstract=abstract)
@@ -257,10 +258,10 @@ def init_ui():
     st.write("This app downloads all NIPS conference papers within a specified year range.")
     st.toast("Welcome to the Neural-PS Scraper")
     st.toast("This App is created by [Anas Altaf](https://github.com/Anas-Altaf)")
-    return st.empty()
+    return st.container()
 
 
-def get_inputs(max_year=2024, min_year=1987, download_directory="./downloads"):
+def get_inputs(max_year=2024, min_year=1987):
     start_year = int(
         st.number_input("Enter Min Year: ", min_value=min_year, max_value=max_year, value=min_year))
     end_year = int(
@@ -285,14 +286,14 @@ async def main():
         # Scraper setup
         base_url = "https://papers.nips.cc"  # The correct base URL for your target website
         download_directory = r".\downloaded_papers"
-        csv_path = "./metadata"
-        csv_file_name = "/papers_metadata.csv"
+        csv_path = r".\metadata"
+        csv_file_name = r"\papers_metadata.csv"
         if not check_network_availability(base_url):
             if st.button("Reload"):
                 st.rerun()
             log_container.error("Unable to access Site, Please check your internet connection and try again.")
             return
-        semaphore = asyncio.Semaphore(10)
+        semaphore = asyncio.Semaphore(50)
         progress_tracker = ProgressTracker()
         # Initialize MetadataStorage
         with log_container.container():
@@ -302,7 +303,7 @@ async def main():
             nips_scrapper = NipsScrapper(base_url, os.path.join(download_directory, 'docs'), semaphore,
                                          progress_tracker, metadata_storage)
             max_year, min_year = await nips_scrapper.get_max_min_year()
-            start_year, end_year = get_inputs(max_year, min_year, download_directory)
+            start_year, end_year = get_inputs(max_year, min_year)
             if st.button("Start Downloading"):
                 if start_year < min_year or end_year > max_year:
                     st.toast(f"Please Enter Year between {min_year} and {max_year}, Please try again")
@@ -311,7 +312,8 @@ async def main():
                     log_container.success(
                         f"Downloading : {(end_year - start_year) + 1} years Papers from {start_year} to {end_year}, Please wait...")
                     # Start downloading papers
-                    await nips_scrapper.download_papers_from_year_range(start_year, end_year)
+                    with st.spinner():
+                        await nips_scrapper.download_papers_from_year_range(start_year, end_year)
                     log_container.toast(f" ✅ Download Completed.")
     except Exception as e:
         st.error(f"Error : {e}")
