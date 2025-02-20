@@ -234,8 +234,7 @@ class NipsScrapper:
                                                                         year,
                                                                         author, paper_abstract))
 
-            for _ in await asyncio.gather(*tasks):
-                await  _
+            await asyncio.gather(*tasks)
 
     async def download_paper_with_semaphore(self, session, pdf_url: str, paper_name: str, year, author, abstract):
         async with self.semaphore:
