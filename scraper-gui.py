@@ -2,6 +2,7 @@ import asyncio
 import csv
 import os
 import re
+from pathlib import Path
 
 import aiofiles
 import aiohttp
@@ -33,16 +34,20 @@ def check_network_availability(url):
         return False
 
 
+def get_absolute_path(relative_path):
+    return Path(relative_path).resolve()
+
+
 class MetadataStorage:
-    def __init__(self, csv_file='./metadata', csv_file_name="/papers_metadata.csv"):
-        self.csv_file = csv_file
-        self.loop = asyncio.get_event_loop()  # Get the event loop
-        self._initialize_files()
+    def __init__(self, csv_file='metadata', csv_file_name='papers_metadata.csv'):
+        self.csv_file = get_absolute_path(csv_file)
         self.csv_file_name = csv_file_name
+        self.loop = asyncio.get_event_loop()
+        self._initialize_files()
 
     def _initialize_files(self):
         # Initialize CSV file with headers if it doesn't exist
-        if not os.path.exists(path=self.csv_file):
+        if not os.path.exists(self.csv_file):
             os.makedirs(self.csv_file)
         # Initialize the CSV file asynchronously
         if not os.path.exists(self.csv_file):
@@ -62,7 +67,11 @@ class MetadataStorage:
 
     def _write_to_csv(self, df):
         # This function runs in a separate thread for non-blocking behavior
-        df.to_csv(self.csv_file + self.csv_file_name, mode='a', header=True, index=False, encoding='utf-8')
+        file_path = os.path.join(self.csv_file, self.csv_file_name)
+        if not os.path.exists(file_path):  # If the file does not exist, write the header
+            df.to_csv(file_path, mode='w', header=True, index=False, encoding='utf-8')
+        else:  # If the file exists, append without writing the header
+            df.to_csv(file_path, mode='a', header=False, index=False, encoding='utf-8')
 
     async def save_paper_metadata(self, paper_name, author, year, pdf_link, abstract):
         paper_name = sanitize_filename(paper_name)
@@ -284,9 +293,9 @@ async def main():
         log_container = init_ui()
         # Scraper setup
         base_url = "https://papers.nips.cc"  # The correct base URL for your target website
-        download_directory = r".\downloaded_papers"
-        csv_path = r".\metadata"
-        csv_file_name = r"\papers_metadata.csv"
+        download_directory = r"downloaded_papers"
+        csv_path = r"metadata"
+        csv_file_name = "papers_metadata.csv"
         if not check_network_availability(base_url):
             if st.button("Reload"):
                 st.rerun()
@@ -299,7 +308,8 @@ async def main():
             download_directory, csv_path = get_paths(csv_path, download_directory)
             # st.write(f"Path is {download_directory}")
             metadata_storage = MetadataStorage(csv_file=csv_path, csv_file_name=csv_file_name)
-            nips_scrapper = NipsScrapper(base_url, os.path.join(download_directory, 'docs'), semaphore,
+            nips_scrapper = NipsScrapper(base_url, get_absolute_path(os.path.join(download_directory, 'docs')),
+                                         semaphore,
                                          progress_tracker, metadata_storage)
             max_year, min_year = await nips_scrapper.get_max_min_year()
             start_year, end_year = get_inputs(max_year, min_year)
